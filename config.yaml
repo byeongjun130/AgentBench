@@ -1,13 +1,13 @@
 # config.yaml
 global:
-  model: "Qwen/Qwen3-32B" 
+  model: "/huggingface_model_weights/gpt-oss-120b/"   # vLLM --served-model-name; adjust if different
   host: localhost
-  port: 8000  
-  temperature: 0.0                        
-  samples: 5                                # Number of query samples to test the agent on
-  shuffle: true                             # Shuffle the test samples  
-  save_trace: true     
-  trace_path: "./trace.txt"                 # Path to save the traces                
+  port: 8100
+  temperature: 0.0
+  samples: 200                              # Number of query samples to test the agent on
+  shuffle: true                             # Shuffle the test samples
+  save_trace: true
+  trace_path: "./traces/trace.json"         # Overridden per agent below
   webshop_url: "http://localhost:3000"
 
 agents:
@@ -16,14 +16,32 @@ agents:
     workload: "hotpotqa"                    # choices: ["webshop", "hotpotqa", "math", "humaneval"]
     iteration_limit: 30                     # Max number of ReAct step (Thought, Action, Observation)
     fewshot: 5                              # Number of fewshop examples
+    trace_path: "./traces/react_hotpotqa_gpt-oss-120b.json"
+
+  my_react_webshop_agent:
+    type: "react"
+    workload: "webshop"
+    iteration_limit: 30
+    fewshot: 5
+    trace_path: "./traces/react_webshop_gpt-oss-120b.json"
 
   my_reflexion_agent:
     type: "reflexion"
     workload: "hotpotqa"                    # choices: ["webshop", "hotpotqa", "math", "humaneval"]
     fewshot: 2                              # Number of fewshop examples
-    context_limit: 2000                     # Number of "words" to limit for chat history                  
+    context_limit: 2000                     # Number of "words" to limit for chat history
     iteration_limit: 10                     # Max number of ReAct step between reflections (Thought, Action, Observation)
     reflection_limit: 3                     # Max number of reflection steps
+    trace_path: "./traces/reflexion_hotpotqa_gpt-oss-120b.json"
+
+  my_reflexion_webshop_agent:
+    type: "reflexion"
+    workload: "webshop"
+    fewshot: 2
+    context_limit: 2000
+    iteration_limit: 10
+    reflection_limit: 3
+    trace_path: "./traces/reflexion_webshop_gpt-oss-120b.json"
 
   my_llmcompiler_agent:
     type: "llmcompiler"

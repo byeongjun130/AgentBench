@@ -1,7 +1,7 @@
 def get_system_prompt(fewshots: int) -> str:
     hotpotqa_instruction_react = """
 Solve a question answering task with interleaving Thought, and Action steps. Here are some guidelines:
-- You need to answer with Thought and Action, tehn you will be given corresponding Observation of the action.
+- You need to answer with Thought and Action, then you will be given corresponding Observation of the action.
 - Use one tool at once.
 - Observations are some Wikipedia passages. Refer to these passages to answer the question.
 - There are cases where the Observations are unclear or irrelevant (in the case wikipedia search was not successful). Then try to use search tool with other query.

@@ -4,6 +4,11 @@ from langchain_openai import ChatOpenAI
 from langgraph.errors import GraphRecursionError
 from colorama import Fore, Style
 from src.agents.ReAct.react import create_react_agent
+from src.trace_capture import (
+    TraceCaptureCallback,
+    make_snooping_http_client,
+    write_agentsim_trace,
+)
 from src.utils import parse_answer
 
 from dotenv import load_dotenv
@@ -44,7 +49,21 @@ def main(args):
         print("\n")
 
     # Load model
-    model = ChatOpenAI(model=args.model, base_url=host_url, stream_usage=True, stop="\nObservation:", temperature=args.temperature)
+    save_trace = bool(getattr(args, "save_trace", False))
+    http_client = make_snooping_http_client() if save_trace else None
+    model = ChatOpenAI(
+        model=args.model,
+        base_url=host_url,
+        stream_usage=True,
+        stop="\nObservation:",
+        temperature=args.temperature,
+        http_client=http_client,
+    )
+
+    trace_callback = TraceCaptureCallback(default_role="actor") if save_trace else None
+    if trace_callback is not None:
+        model.callbacks = [trace_callback]
+    trace_agents = []
 
     system_prompt = None
     count = 0
@@ -73,11 +92,15 @@ def main(args):
                 messages = [("human", query)]
 
             count += 1
+            if trace_callback is not None:
+                trace_callback.reset()
+            sample_pass = False
             start_time = time.time()
             try:
                 with trace("ReAct_trace", tags=[args.workload, args.model, "Iteration_limit:"+str(args.iteration_limit)]):
                     output_dict = run_agent(args=args, agent=langgraph_agent_executor, messages=messages, label=dataset[i]['answer'], evaluator=evaluator, query=query) # query is just for tracing.
-                if output_dict["ispass"]:
+                sample_pass = bool(output_dict["ispass"])
+                if sample_pass:
                     pass_count += 1
             except GraphRecursionError:
                 print(Fore.RED + f"Error: The agent has reached its maximum iteration limit. Increase the iteration limit to reduce errors.\n"+Style.RESET_ALL)
@@ -89,6 +112,10 @@ def main(args):
             latencies.append(end_time-start_time)
             print(f"Latency: {round(end_time-start_time, 2)} sec")
             pretty_output(i)
+            if trace_callback is not None:
+                trace_agents.append(
+                    {"success": sample_pass, "turns": trace_callback.snapshot_turns()}
+                )
 
     elif args.workload == "webshop":
         from src.tools.webshop_tools.webshop_tools import SearchTool, ClickTool, ResetTool, set_webshop_url
@@ -113,15 +140,19 @@ def main(args):
                 messages = [("system", system_prompt), ("human", query)]
             else:
                 messages = [("human", query)]
-                
+
             count += 1
+            if trace_callback is not None:
+                trace_callback.reset()
+            sample_pass = False
             start_time = time.time()
             try:
                 with trace("ReAct_trace", tags=[args.workload, args.model, "Iteration_limit:"+str(args.iteration_limit), "Index:"+str(i)]):
                     output_dict = run_agent(args=args, agent=langgraph_agent_executor, messages=messages, label=None, evaluator=evaluator, query=query)
-                if output_dict["ispass"]:
+                sample_pass = bool(output_dict["ispass"])
+                if sample_pass:
                     pass_count += 1
-                
+
                 score_sum += float(output_dict["score"])
             except GraphRecursionError:
                 print(Fore.RED + f"Error: The agent has reached its maximum iteration limit. Increase the iteration limit to reduce errors.\n" + Style.RESET_ALL)
@@ -133,6 +164,10 @@ def main(args):
             latencies.append(end_time-start_time)
             print(f"Latency: {round(end_time-start_time, 2)} sec\n")
             pretty_output(i)
+            if trace_callback is not None:
+                trace_agents.append(
+                    {"success": sample_pass, "turns": trace_callback.snapshot_turns()}
+                )
         
     elif args.workload == "math":
         from src.tools.math_tools.math_tools import WolframAlphaTool, CalculatorTool, FinishTool
@@ -211,6 +246,14 @@ def main(args):
             latencies.append(end_time-start_time)
             print(f"Latency: {round(end_time-start_time, 2)} sec\n")
             pretty_output(i)
+
+    if save_trace and trace_agents:
+        write_agentsim_trace(
+            path=args.trace_path,
+            model=args.model,
+            agents=trace_agents,
+        )
+        print(f"Saved AgentSim trace to {args.trace_path} ({len(trace_agents)} agents)")
 
 @traceable()
 def run_agent(args, agent, messages, label=None, evaluator=None, query=None):

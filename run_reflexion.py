@@ -5,11 +5,30 @@ from colorama import Fore, Style
 from src.agents.Reflexion.agent import ReflexionAgent
 from src.agents.Reflexion.fewshots import get_action_examples, get_reflection_examples
 from src.agents.Reflexion.prompt import get_action_prompt, get_reflection_prompt
+from src.trace_capture import (
+    TraceCaptureCallback,
+    make_snooping_http_client,
+    write_agentsim_trace,
+)
 from langchain_openai import ChatOpenAI
 from langsmith import traceable, trace
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _wrap_reflect_for_tracing(agent, trace_callback):
+    """Wrap agent.reflect so its LLM calls are tagged role='reflect'."""
+    original_reflect = agent.reflect
+
+    def traced_reflect(*args, **kwargs):
+        trace_callback.set_role("reflect")
+        try:
+            return original_reflect(*args, **kwargs)
+        finally:
+            trace_callback.set_role(None)
+
+    agent.reflect = traced_reflect
 
 def get_tools(args):
     if args.workload == "hotpotqa":
@@ -61,7 +80,21 @@ def main(args):
     else:
         host_url = None
 
-    llm = ChatOpenAI(model=args.model, base_url=host_url, stream_usage=True, temperature=args.temperature)
+    save_trace = bool(getattr(args, "save_trace", False))
+    http_client = make_snooping_http_client() if save_trace else None
+    llm = ChatOpenAI(
+        model=args.model,
+        base_url=host_url,
+        stream_usage=True,
+        temperature=args.temperature,
+        http_client=http_client,
+    )
+
+    trace_callback = TraceCaptureCallback(default_role="actor") if save_trace else None
+    if trace_callback is not None:
+        llm.callbacks = [trace_callback]
+    trace_agents = []
+
     tools = get_tools(args)
     action_prompt = get_action_prompt(args.workload)
     reflection_prompt = get_reflection_prompt(args.workload)
@@ -81,6 +114,8 @@ def main(args):
         evaluator=evaluator,
         print_log=print_log,
     )
+    if trace_callback is not None:
+        _wrap_reflect_for_tracing(agent, trace_callback)
     if args.workload == "hotpotqa":
         for i in range(iteration):
             data = dataset[i]
@@ -88,11 +123,14 @@ def main(args):
             answer = data.get("answer")
             print(Fore.CYAN+Style.BRIGHT+f"[Sample {i+1}/{iteration}] {query}"+Style.RESET_ALL)
             agent.set_qa(query)
+            if trace_callback is not None:
+                trace_callback.reset()
+            ispass = False
             start = time.time()
-            with trace("Reflexion_trace", 
-                       tags=[args.workload, 
-                             args.model, 
-                             "Iteration_limit:"+str(args.iteration_limit), 
+            with trace("Reflexion_trace",
+                       tags=[args.workload,
+                             args.model,
+                             "Iteration_limit:"+str(args.iteration_limit),
                              "Reflection_limit:"+str(args.reflection_limit),
                              "Index:"+str(i)]):
                 _, ispass = run_agent(
@@ -110,6 +148,10 @@ def main(args):
             if ispass:
                 num_success += 1
             pretty_output(i)
+            if trace_callback is not None:
+                trace_agents.append(
+                    {"success": bool(ispass), "turns": trace_callback.snapshot_turns()}
+                )
 
     elif args.workload == "math":
         from src.tools.math_tools.math_equivalence import extract_boxed_value
@@ -146,6 +188,9 @@ def main(args):
             query = reset._run()
             agent.set_qa(query)
             print(Fore.CYAN+Style.BRIGHT+f"[Sample {i+1}/{iteration}] {query}"+Style.RESET_ALL)
+            if trace_callback is not None:
+                trace_callback.reset()
+            ispass = False
             start = time.time()
             with trace("Reflexion_trace", tags=[args.workload, args.model, "Iteration_limit:"+str(args.iteration_limit), "Reflection_limit:"+str(args.reflection_limit)]):
                 score, ispass = run_agent(
@@ -164,6 +209,10 @@ def main(args):
             if ispass:
                 num_success += 1
             pretty_output(i)
+            if trace_callback is not None:
+                trace_agents.append(
+                    {"success": bool(ispass), "turns": trace_callback.snapshot_turns()}
+                )
 
     elif args.workload == "humaneval":
         from src.tools.humaneval_tools.coding_tools import GeneratorTool, ExecutorTool, FinishTool
@@ -204,6 +253,14 @@ def main(args):
             pretty_output(i)
     else:
         NotImplementedError(f"Not implemented error: {args.workload}")
+
+    if save_trace and trace_agents:
+        write_agentsim_trace(
+            path=args.trace_path,
+            model=args.model,
+            agents=trace_agents,
+        )
+        print(f"Saved AgentSim trace to {args.trace_path} ({len(trace_agents)} agents)")
     return
 
 @traceable()

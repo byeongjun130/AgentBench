@@ -5,3 +5,11 @@ venv/
 logs/
 *.log
 *.tmp
+
+# Editor / IDE
+.vscode/
+
+# Local run artifacts / smoke-test scratch
+traces/
+session/
+config_smoke.yaml
