@@ -4,6 +4,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.errors import GraphRecursionError
 from colorama import Fore, Style
 from src.agents.ReAct.react import create_react_agent
+from src.agents.ReAct.react_toolcall import create_react_agent_toolcall
 from src.trace_capture import (
     TraceCaptureCallback,
     make_snooping_http_client,
@@ -55,17 +56,21 @@ def main(args):
         print("=" * 30+Style.RESET_ALL)
         print("\n")
 
+    use_tool_calling = bool(getattr(args, "use_tool_calling", False))
+
     # Load model
     save_trace = bool(getattr(args, "save_trace", False))
     http_client = make_snooping_http_client() if save_trace else None
-    model = ChatOpenAI(
+    model_kwargs = dict(
         model=args.model,
         base_url=host_url,
         stream_usage=True,
-        stop=["Observation:"],
         temperature=args.temperature,
         http_client=http_client,
     )
+    if not use_tool_calling:
+        model_kwargs["stop"] = ["Observation:"]
+    model = ChatOpenAI(**model_kwargs)
 
     trace_callback = (
         TraceCaptureCallback(default_role="actor", tokenizer_path=args.model)
@@ -81,24 +86,38 @@ def main(args):
     pass_count = 0
     if args.workload == "hotpotqa":
         from src.tools.hotpotqa_tools.wikipedia import WikipediaTool, LookupTool, FinishTool
-        from src.agents.ReAct.prompt.hotpotqa import get_system_prompt
-        if args.fewshot > 5:
-            print(f"Max fewshot examples for {args.workload} is 5. Running with 5 fewshot examples.")
-        system_prompt = get_system_prompt(fewshots=min(args.fewshot, 5))
         search = WikipediaTool(name="search")
         lookup = LookupTool(name="lookup")
         finish = FinishTool(name="finish")
         tools = [search, lookup, finish]
-        langgraph_agent_executor = create_react_agent(
-            model, tools=tools, print_log=print_log
-        )
+        if use_tool_calling:
+            from src.agents.ReAct.prompt.hotpotqa_toolcall import (
+                get_fewshot_messages_toolcall,
+                get_system_prompt_toolcall,
+            )
+            system_prompt = get_system_prompt_toolcall()
+            fewshot_messages = get_fewshot_messages_toolcall()
+            langgraph_agent_executor = create_react_agent_toolcall(
+                model, tools=tools, print_log=print_log
+            )
+        else:
+            from src.agents.ReAct.prompt.hotpotqa import get_system_prompt
+            if args.fewshot > 5:
+                print(f"Max fewshot examples for {args.workload} is 5. Running with 5 fewshot examples.")
+            system_prompt = get_system_prompt(fewshots=min(args.fewshot, 5))
+            langgraph_agent_executor = create_react_agent(
+                model, tools=tools, print_log=print_log
+            )
         
         for i in range(samples):
             query = dataset[i]["question"]
             print(Fore.CYAN+Style.BRIGHT+f"[Sample {i+1}/{samples}] {query}"+Style.RESET_ALL)
 
             if system_prompt:
-                messages = [("system", system_prompt), ("human", query)]
+                messages = [("system", system_prompt)]
+                if use_tool_calling:
+                    messages += fewshot_messages
+                messages += [("human", query)]
             else:
                 messages = [("human", query)]
 
@@ -259,10 +278,15 @@ def main(args):
             pretty_output(i)
 
     if save_trace and trace_agents:
+        tools_schema = None
+        if use_tool_calling:
+            from langchain_core.utils.function_calling import convert_to_openai_tool
+            tools_schema = [convert_to_openai_tool(t) for t in tools]
         write_agentsim_trace(
             path=args.trace_path,
             model=args.model,
             agents=trace_agents,
+            tools=tools_schema,
         )
         print(f"Saved AgentSim trace to {args.trace_path} ({len(trace_agents)} agents)")
 

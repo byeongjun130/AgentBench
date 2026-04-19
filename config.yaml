@@ -15,9 +15,21 @@ agents:
   my_react_agent:                           # Name of agent, put this name to "python --agent [agent name]""
     type: "react"                           # Type of agent. ["react", "reflexion"]
     workload: "hotpotqa"                    # choices: ["webshop", "hotpotqa", "math", "humaneval"]
-    iteration_limit: 40                     # Max number of ReAct step (Thought, Action, Observation)
+    iteration_limit: 60                     # Max number of ReAct step (Thought, Action, Observation)
     fewshot: 5                              # Number of fewshop examples
-    trace_path: "./traces/react_hotpotqa_0-99.json"
+    samples: 30
+    sample_start: 0
+    trace_path: "./traces/react_hotpotqa_30_channel-hint.json"
+
+  my_react_toolcall_agent:                  # Native tool-calling variant of ReAct (no text-based Action: syntax)
+    type: "react"
+    workload: "hotpotqa"
+    iteration_limit: 60
+    fewshot: 0                              # unused in tool-call mode
+    use_tool_calling: true
+    samples: 3
+    sample_start: 0
+    trace_path: "./traces/react_hotpotqa_3_toolcall_structured.json"
 
   my_react_webshop_agent:
     type: "react"

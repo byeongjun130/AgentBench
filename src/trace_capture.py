@@ -165,7 +165,34 @@ def _message_to_openai_dict(message: BaseMessage) -> Dict[str, Any]:
         if isinstance(message.content, str)
         else str(message.content)
     )
-    return {"role": role, "content": content}
+    out: Dict[str, Any] = {"role": role, "content": content}
+
+    # Preserve structural fields so AgentSim can reconstruct exact prompt
+    # tokens via `tokenizer.apply_chat_template(messages, tools=tools)`.
+    # See validation/trace_estimator/convert_minisweagent.py for the
+    # consumption pattern in AgentSim.
+    if role == "assistant":
+        tool_calls = getattr(message, "tool_calls", None) or []
+        if tool_calls:
+            out["tool_calls"] = [
+                {
+                    "id": tc.get("id", f"call_{i}"),
+                    "type": "function",
+                    "function": {
+                        "name": tc.get("name", ""),
+                        "arguments": json.dumps(
+                            tc.get("args", {}) or {},
+                            ensure_ascii=False,
+                        ),
+                    },
+                }
+                for i, tc in enumerate(tool_calls)
+            ]
+    elif role == "tool":
+        tool_call_id = getattr(message, "tool_call_id", None)
+        if tool_call_id is not None:
+            out["tool_call_id"] = tool_call_id
+    return out
 
 
 class TraceCaptureCallback(BaseCallbackHandler):
@@ -259,6 +286,7 @@ class TraceCaptureCallback(BaseCallbackHandler):
             return
 
         content = ""
+        tool_calls_list: List[Dict[str, Any]] = []
         prompt_tokens = 0
         completion_tokens = 0
         reasoning_tokens = 0
@@ -272,6 +300,16 @@ class TraceCaptureCallback(BaseCallbackHandler):
                     if isinstance(message.content, str)
                     else str(message.content)
                 )
+                # Capture structured tool_calls so AgentSim can count the
+                # tokens they carry into turn i+1's prompt. For tool-calling
+                # agents the assistant `content` is usually empty and the
+                # real output is entirely in tool_calls.
+                raw_tool_calls = getattr(message, "tool_calls", None) or []
+                for tc in raw_tool_calls:
+                    tool_calls_list.append({
+                        "name": tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", ""),
+                        "args": tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {}),
+                    })
                 usage = getattr(message, "usage_metadata", None) or {}
                 prompt_tokens = int(usage.get("input_tokens", 0) or 0)
                 completion_tokens = int(usage.get("output_tokens", 0) or 0)
@@ -315,6 +353,21 @@ class TraceCaptureCallback(BaseCallbackHandler):
             except (KeyError, IndexError, TypeError):
                 pass
 
+        response_message: Dict[str, Any] = {"role": "assistant", "content": content}
+        if tool_calls_list:
+            response_message["tool_calls"] = [
+                {
+                    "id": f"call_{i}",
+                    "type": "function",
+                    "function": {
+                        "name": tc.get("name", ""),
+                        "arguments": json.dumps(
+                            tc.get("args", {}) or {}, ensure_ascii=False
+                        ),
+                    },
+                }
+                for i, tc in enumerate(tool_calls_list)
+            ]
         turn = {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -322,9 +375,7 @@ class TraceCaptureCallback(BaseCallbackHandler):
             "non_llm_latency": 0.0,
             "role": pending["role"],
             "request_messages": pending["request_messages"],
-            "response_messages": [
-                {"role": "assistant", "content": content}
-            ],
+            "response_messages": [response_message],
         }
         if reasoning_text:
             turn["reasoning_text"] = reasoning_text
@@ -349,16 +400,25 @@ def write_agentsim_trace(
     path: str,
     model: str,
     agents: List[Dict[str, Any]],
+    tools: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
-    """Write an AgentSim agentic-format JSON trace to `path`."""
+    """Write an AgentSim agentic-format JSON trace to `path`.
+
+    When `tools` is provided (OpenAI function-schema format), it is stored
+    at the envelope level so AgentSim's converter can feed it to
+    `tokenizer.apply_chat_template(messages, tools=tools)` and reconstruct
+    prompt tokens that include the `bind_tools` schema overhead.
+    """
     out_dir = os.path.dirname(path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-    payload = {
+    payload: Dict[str, Any] = {
         "version": 2,
         "type": "agentic",
         "model": model,
         "agents": agents,
     }
+    if tools:
+        payload["tools"] = tools
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
