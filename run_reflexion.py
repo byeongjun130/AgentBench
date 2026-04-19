@@ -90,7 +90,11 @@ def main(args):
         http_client=http_client,
     )
 
-    trace_callback = TraceCaptureCallback(default_role="actor") if save_trace else None
+    trace_callback = (
+        TraceCaptureCallback(default_role="actor", tokenizer_path=args.model)
+        if save_trace
+        else None
+    )
     if trace_callback is not None:
         llm.callbacks = [trace_callback]
     trace_agents = []

@@ -108,4 +108,4 @@ Action: finish[yes]
 Answer: yes
 """
     ]
-    return hotpotqa_instruction_react + "\n".join(examples[:fewshots]) + "Answer wirh\nThought: \nAnswer: "
+    return hotpotqa_instruction_react + "\n".join(examples[:fewshots]) + "Answer with\nThought: \nAnswer: "

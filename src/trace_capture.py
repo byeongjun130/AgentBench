@@ -176,14 +176,44 @@ class TraceCaptureCallback(BaseCallbackHandler):
     points fired by the chat-model runtime: ``on_chat_model_start`` (sees
     outgoing prompt messages) and ``on_llm_end`` (sees the response + token
     usage). Each pair produces one turn entry.
+
+    When ``tokenizer_path`` is given, the callback lazy-loads the matching
+    HuggingFace tokenizer and uses it to count reasoning tokens from the
+    captured reasoning_text whenever the server's usage block does not
+    report reasoning_tokens (vLLM's openai_gptoss parser splits the
+    reasoning channel but does not emit a separate token count).
     """
 
-    def __init__(self, default_role: str = "actor") -> None:
+    def __init__(
+        self,
+        default_role: str = "actor",
+        tokenizer_path: Optional[str] = None,
+    ) -> None:
         self.default_role = default_role
         self.role_override: Optional[str] = None
         self.turns: List[Dict[str, Any]] = []
         self._pending: Dict[UUID, Dict[str, Any]] = {}
         self._last_end_time: Optional[float] = None
+        self._tokenizer_path = tokenizer_path
+        self._tokenizer: Any = None
+        self._tokenizer_load_failed = False
+
+    def _count_reasoning_tokens(self, text: str) -> int:
+        if not text or not self._tokenizer_path or self._tokenizer_load_failed:
+            return 0
+        if self._tokenizer is None:
+            try:
+                from transformers import AutoTokenizer
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    self._tokenizer_path
+                )
+            except Exception:
+                self._tokenizer_load_failed = True
+                return 0
+        try:
+            return len(self._tokenizer.encode(text, add_special_tokens=False))
+        except Exception:
+            return 0
 
     def reset(self) -> None:
         self.turns = []
@@ -302,7 +332,17 @@ class TraceCaptureCallback(BaseCallbackHandler):
         self._last_end_time = end_time
 
     def snapshot_turns(self) -> List[Dict[str, Any]]:
-        return [dict(turn) for turn in self.turns]
+        # Fill reasoning_tokens via tokenizer here (off the per-turn
+        # latency path) when vLLM's usage block omitted it.
+        snapshot = []
+        for turn in self.turns:
+            copied = dict(turn)
+            if copied["reasoning_tokens"] == 0 and copied.get("reasoning_text"):
+                copied["reasoning_tokens"] = self._count_reasoning_tokens(
+                    copied["reasoning_text"]
+                )
+            snapshot.append(copied)
+        return snapshot
 
 
 def write_agentsim_trace(

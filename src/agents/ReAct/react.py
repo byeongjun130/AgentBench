@@ -1,7 +1,7 @@
 from typing import Literal, Sequence, Union
 
 from langchain_core.language_models import LanguageModelLike
-from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from typing_extensions import Annotated, TypedDict
@@ -27,7 +27,7 @@ def extract_thoughts_and_actions(input_str):
         result+="Action: " + action + "\n"
 
     if not result:
-        return "Response parsing error: You must respond with Thought: and Action:."
+        return input_str
     return result.strip()
 
 def extract_tool_calls(input_str):
@@ -105,13 +105,13 @@ def create_react_agent(
                     tool_output = f"Tool Execution Error: {e}"
                     if print_log:
                         print(tool_output)
-                    messages.append(SystemMessage(content=tool_output, artifact={"done": False}))
+                    messages.append(HumanMessage(content=tool_output, artifact={"done": False}))
                     return {"messages": messages}
                 if tool["name"] == "finish":
-                    messages.append(SystemMessage(content=tool_output, artifact={"done": True}))
+                    messages.append(HumanMessage(content=tool_output, artifact={"done": True}))
                     return {"messages": messages}
                 else:
-                    messages.append(SystemMessage(content=f"Action: {tool['name']}[{tool['argument']}]\nObservation: {tool_output}", artifact=artifact))
+                    messages.append(HumanMessage(content=f"Observation: {tool_output}", artifact=artifact))
             if messages:
                 return {"messages": messages}
             else:
