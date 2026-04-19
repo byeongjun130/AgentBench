@@ -4,7 +4,8 @@ global:
   host: localhost
   port: 8100
   temperature: 0.0
-  samples: 30                               # Number of query samples to test the agent on
+  samples: 100                              # Number of query samples to test the agent on
+  sample_start: 0                           # First dataset index to use (inclusive); pairs with `samples` to form [start, start+samples)
   shuffle: false                            # Shuffle the test samples
   save_trace: true
   trace_path: "./traces/trace.json"         # Overridden per agent below
@@ -16,7 +17,7 @@ agents:
     workload: "hotpotqa"                    # choices: ["webshop", "hotpotqa", "math", "humaneval"]
     iteration_limit: 40                     # Max number of ReAct step (Thought, Action, Observation)
     fewshot: 5                              # Number of fewshop examples
-    trace_path: "./traces/react_hotpotqa_gpt-oss-120b.json"
+    trace_path: "./traces/react_hotpotqa_0-99.json"
 
   my_react_webshop_agent:
     type: "react"

@@ -30,6 +30,8 @@ def main(args):
     print(f"Loading dataset for workload: {args.workload}")
     dataset = load_dataset(args.workload)
     evaluator = get_evaluation_function(args.workload)
+    sample_start = int(getattr(args, "sample_start", 0) or 0)
+    dataset = dataset[sample_start:]
     samples = min(len(dataset), args.samples) if args.samples else len(dataset)
     latencies = []
 
