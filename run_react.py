@@ -30,9 +30,14 @@ def main(args):
     print(f"Loading dataset for workload: {args.workload}")
     dataset = load_dataset(args.workload)
     evaluator = get_evaluation_function(args.workload)
-    sample_start = int(getattr(args, "sample_start", 0) or 0)
-    dataset = dataset[sample_start:]
-    samples = min(len(dataset), args.samples) if args.samples else len(dataset)
+    sample_indices = getattr(args, "sample_indices", None)
+    if sample_indices:
+        dataset = [dataset[i] for i in sample_indices]
+        samples = len(dataset)
+    else:
+        sample_start = int(getattr(args, "sample_start", 0) or 0)
+        dataset = dataset[sample_start:]
+        samples = min(len(dataset), args.samples) if args.samples else len(dataset)
     latencies = []
 
     def pretty_output(i):
