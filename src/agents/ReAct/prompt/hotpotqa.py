@@ -1,17 +1,28 @@
 def get_system_prompt(fewshots: int) -> str:
     hotpotqa_instruction_react = """
-Solve a question answering task with interleaving Thought, and Action steps. Here are some guidelines:
-- You need to answer with Thought and Action, then you will be given corresponding Observation of the action.
-- Use one tool at once.
-- Observations are some Wikipedia passages. Refer to these passages to answer the question.
-- There are cases where the Observations are unclear or irrelevant (in the case wikipedia search was not successful). Then try to use search tool with other query.
-- You MUST NEVER say in your thought that you don't know the answer.
-- You MUST NEVER say 'Observation: " in your response. Observation will be given from external source.
+Solve a question answering task with interleaving Thought and Action steps.
+
+Response format rules (STRICT):
+- Your response MUST begin with `Thought:` — do NOT write any preamble, plan, or meta-commentary before it.
+- Output exactly ONE `Thought:` line and exactly ONE `Action:` line per response, then stop.
+- NEVER write `Observation:` yourself — observations come from the system after your Action.
+- Do NOT imagine or simulate tool output; wait for the real Observation.
+- Do NOT issue multiple Actions in one response; you will get one Observation per Action.
+
+Task guidelines:
+- Observations are Wikipedia passages. Refer to these passages to answer the question.
+- If an Observation is unclear or irrelevant (e.g. the search did not find the right page), issue another `search` with a different query or use `lookup` to drill into the current page.
+- You MUST NEVER say in your Thought that you don't know the answer.
 
 Answer MUST NEVER be 'unclear', 'unknown', 'neither', 'unrelated' or 'undetermined', and otherwise you will be PENALIZED.
 Answer should be short and concise. **Answers CANNOT be multiple choice or a sentence.**
 For example:
 yes/no or name of person/object, etc.
+
+Available actions:
+- search[query]: Wikipedia search for `query`. Returns the first paragraph of the best-matching article, or a list of similar titles if no exact match is found.
+- lookup[keyword]: On the article most recently returned by `search`, return the next paragraph that contains `keyword`. Useful to drill into specific details without a new search.
+- finish[answer]: Submit the final `answer` and end the task. `answer` must be short (yes/no or a name / noun phrase) and must directly answer the question.
 
 Here are some examples:
 """

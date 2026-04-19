@@ -81,11 +81,28 @@ def create_react_agent(
     if print_log:
         print(f"Registered tools: {list(tool_dict.keys())}")
 
+    format_error_message = (
+        "Observation: Your response must be in this exact format:\n"
+        "Thought: <your reasoning>\n"
+        "Action: tool_name[argument]\n"
+        "Do not include any prefix text, extra Actions, or additional sections."
+    )
+
+    def is_valid_react_format(content: str) -> bool:
+        stripped = content.strip()
+        if not stripped.startswith("Thought:"):
+            return False
+        if stripped.count("Action:") != 1:
+            return False
+        return True
+
     def execute_tool(state: AgentState) -> AgentState:
         last_message = state["messages"][-1]
+        if not is_valid_react_format(last_message.content):
+            return {"messages": [HumanMessage(content=format_error_message, artifact={"done": False})]}
         tool_calls = extract_tool_calls(last_message.content)
         if not tool_calls:
-            return {"messages": [HumanMessage(content="You need to answer with \nThought: \nAction: tool_name[argument]", artifact={"done": False})]}
+            return {"messages": [HumanMessage(content=format_error_message, artifact={"done": False})]}
         else:
             messages = []
             for tool in tool_calls:
@@ -115,7 +132,7 @@ def create_react_agent(
             if messages:
                 return {"messages": messages}
             else:
-                return {"messages": [HumanMessage(content="Wrong tool call format. Retry to response with \nThought: \nAction: [tool calls]", artifact={"done": False})]}
+                return {"messages": [HumanMessage(content=format_error_message, artifact={"done": False})]}
 
     # Define the function that calls the model
     def call_model(state: AgentState, config: RunnableConfig) -> AgentState:
@@ -125,7 +142,6 @@ def create_react_agent(
                 response += chunk
             else:
                 response = chunk
-        response.content = extract_thoughts_and_actions(response.content)
         if print_log:
             print(response.content)
         return {"messages": [response]}

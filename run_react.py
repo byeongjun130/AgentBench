@@ -55,7 +55,7 @@ def main(args):
         model=args.model,
         base_url=host_url,
         stream_usage=True,
-        stop="\nObservation:",
+        stop=["Observation:"],
         temperature=args.temperature,
         http_client=http_client,
     )

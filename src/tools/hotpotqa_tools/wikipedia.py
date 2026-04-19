@@ -236,6 +236,17 @@ class DocstoreExplorer:
         self.char_limit = char_limit
         self.one_sentence = one_sentence
 
+    def _summary_with_lookup_hint(self) -> str:
+        summary = self._summary
+        remaining = max(0, len(self._paragraphs) - 1)
+        if remaining > 0:
+            summary += (
+                f"\n\nThis page has {remaining} more paragraphs. "
+                f"lookup[keyword] is available to find the next paragraph "
+                f"containing `keyword` without re-searching."
+            )
+        return summary
+
     def search(self, term: str) -> str:
         """Search for a term in the docstore, and if found save."""
         result = self.docstore.load(term)
@@ -243,7 +254,7 @@ class DocstoreExplorer:
             self.document = None
             result = "No search results found."
             return result
-            
+
         result = result[0]
 
         if self.one_sentence:
@@ -252,7 +263,7 @@ class DocstoreExplorer:
             result = result[: self.char_limit]
         if isinstance(result, Document):
             self.document = result
-            return self._summary
+            return self._summary_with_lookup_hint()
         else:
             self.document = None
             return result
@@ -267,7 +278,7 @@ class DocstoreExplorer:
             result = result[: self.char_limit]
         if isinstance(result, Document):
             self.document = result
-            return self._summary
+            return self._summary_with_lookup_hint()
         else:
             self.document = None
             return result
