@@ -92,8 +92,9 @@ def create_react_agent_toolcall(
                 continue
             try:
                 result = tool_dict[name].invoke(args)
+                tool_artifact = None
                 if isinstance(result, tuple):
-                    result, _ = result
+                    result, tool_artifact = result
             except Exception as e:
                 out.append(ToolMessage(
                     content=f"Tool Execution Error: {e}",
@@ -110,7 +111,10 @@ def create_react_agent_toolcall(
                     artifact={"done": True},
                 ))
                 return {"messages": out}
-            out.append(ToolMessage(content=result, tool_call_id=tc_id, artifact=None))
+            # webshop's SearchTool/ClickTool return (observation, info); info carries
+            # `done: True` once the user clicks Buy Now. Pass it through so
+            # `should_continue` can exit without a dedicated finish tool.
+            out.append(ToolMessage(content=result, tool_call_id=tc_id, artifact=tool_artifact))
         return {"messages": out}
 
     def should_continue(state: AgentState) -> Literal["agent", "__end__"]:

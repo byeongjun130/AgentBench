@@ -401,6 +401,7 @@ def write_agentsim_trace(
     model: str,
     agents: List[Dict[str, Any]],
     tools: Optional[List[Dict[str, Any]]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Write an AgentSim agentic-format JSON trace to `path`.
 
@@ -408,6 +409,12 @@ def write_agentsim_trace(
     at the envelope level so AgentSim's converter can feed it to
     `tokenizer.apply_chat_template(messages, tools=tools)` and reconstruct
     prompt tokens that include the `bind_tools` schema overhead.
+
+    `metadata` keys are merged into the envelope (e.g. the
+    `summarize_token_threshold` that produced this run, so AgentSim's
+    auto-fitter can key its summarizer-node distributions on it).
+    Reserved keys (`version`, `type`, `model`, `agents`, `tools`) cannot
+    be overwritten.
     """
     out_dir = os.path.dirname(path)
     if out_dir:
@@ -420,5 +427,11 @@ def write_agentsim_trace(
     }
     if tools:
         payload["tools"] = tools
+    if metadata:
+        reserved = {"version", "type", "model", "agents", "tools"}
+        for k, v in metadata.items():
+            if k in reserved:
+                continue
+            payload[k] = v
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)

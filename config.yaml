@@ -1,6 +1,6 @@
 # config.yaml
 global:
-  model: "/huggingface_model_weights/gpt-oss-120b/"   # vLLM --served-model-name; adjust if different
+  model: "/data02/huggingface_model_weights/gpt-oss-120b/"   # vLLM --served-model-name; adjust if different
   host: localhost
   port: 8100
   temperature: 0.0
@@ -21,15 +21,15 @@ agents:
     sample_start: 0
     trace_path: "./traces/react_hotpotqa_30_channel-hint.json"
 
-  my_react_toolcall_agent:                  # Native tool-calling variant of ReAct (no text-based Action: syntax)
+  my_react_hotpotqa_toolcall_agent:                  # Native tool-calling variant of ReAct (no text-based Action: syntax)
     type: "react"
     workload: "hotpotqa"
     iteration_limit: 60
     fewshot: 0                              # unused in tool-call mode
     use_tool_calling: true
-    samples: 3
+    samples: 500
     sample_start: 0
-    trace_path: "./traces/react_hotpotqa_3_toolcall_structured.json"
+    trace_path: "./traces/react_hotpotqa_500_toolcall.json"
 
   my_react_webshop_agent:
     type: "react"
@@ -38,7 +38,39 @@ agents:
     fewshot: 5
     trace_path: "./traces/react_webshop_gpt-oss-120b.json"
 
-  my_reflexion_agent:
+  my_react_webshop_toolcall_agent:          # Native tool-calling variant for webshop
+    type: "react"
+    workload: "webshop"
+    iteration_limit: 60
+    fewshot: 0                              # fewshot handled inside webshop_toolcall.py
+    use_tool_calling: true
+    samples: 500
+    sample_start: 0
+    trace_path: "./traces/react_webshop_500_toolcall.json"
+
+  my_react_hotpotqa_toolcall_summarize_agent:    # ReAct + auto-compact summarization (hotpotqa)
+    type: "react"
+    workload: "hotpotqa"
+    iteration_limit: 60
+    fewshot: 0
+    use_tool_calling: true
+    samples: 500
+    sample_start: 0
+    summarize_token_threshold: 4000             # 0 / null disables. Sweep: {2000,4000,6000,8000,12000,0}
+    trace_path: "./traces/react_hotpotqa_500_toolcall_summ_T4000.json"
+
+  my_react_webshop_toolcall_summarize_agent:     # ReAct + auto-compact summarization (webshop)
+    type: "react"
+    workload: "webshop"
+    iteration_limit: 60
+    fewshot: 0
+    use_tool_calling: true
+    samples: 30
+    sample_start: 0
+    summarize_token_threshold: 4000             # 0 / null disables. Sweep: {2000,4000,6000,8000,12000,0}
+    trace_path: "./traces/react_webshop_500_toolcall_summ_T8000.json"
+
+  my_reflexion_hotpotqa_agent:
     type: "reflexion"
     workload: "hotpotqa"                    # choices: ["webshop", "hotpotqa", "math", "humaneval"]
     fewshot: 2                              # Number of fewshop examples

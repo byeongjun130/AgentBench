@@ -5,6 +5,9 @@ from langgraph.errors import GraphRecursionError
 from colorama import Fore, Style
 from src.agents.ReAct.react import create_react_agent
 from src.agents.ReAct.react_toolcall import create_react_agent_toolcall
+from src.agents.ReAct.react_toolcall_summarize import (
+    create_react_agent_toolcall_summarize,
+)
 from src.trace_capture import (
     TraceCaptureCallback,
     make_snooping_http_client,
@@ -57,6 +60,14 @@ def main(args):
         print("\n")
 
     use_tool_calling = bool(getattr(args, "use_tool_calling", False))
+    summarize_token_threshold = int(
+        getattr(args, "summarize_token_threshold", 0) or 0
+    )
+    if summarize_token_threshold > 0 and not use_tool_calling:
+        raise ValueError(
+            "summarize_token_threshold > 0 requires use_tool_calling=true; "
+            "auto-compact is only wired for the tool-calling ReAct variant."
+        )
 
     # Load model
     save_trace = bool(getattr(args, "save_trace", False))
@@ -81,6 +92,14 @@ def main(args):
         model.callbacks = [trace_callback]
     trace_agents = []
 
+    # Tokenizer used by the summarize-aware graph to count the prompt the
+    # *next* agent call would send. Loaded once when needed; matches the
+    # tokenizer the trace_callback lazy-loads for reasoning-token counting.
+    summarize_tokenizer = None
+    if summarize_token_threshold > 0:
+        from transformers import AutoTokenizer
+        summarize_tokenizer = AutoTokenizer.from_pretrained(args.model)
+
     system_prompt = None
     count = 0
     pass_count = 0
@@ -97,9 +116,24 @@ def main(args):
             )
             system_prompt = get_system_prompt_toolcall()
             fewshot_messages = get_fewshot_messages_toolcall()
-            langgraph_agent_executor = create_react_agent_toolcall(
-                model, tools=tools, print_log=print_log
-            )
+            if summarize_token_threshold > 0:
+                pinned_head_count = (
+                    (1 if system_prompt else 0) + len(fewshot_messages) + 1
+                )
+                langgraph_agent_executor = create_react_agent_toolcall_summarize(
+                    model,
+                    tools=tools,
+                    summarize_token_threshold=summarize_token_threshold,
+                    pinned_head_count=pinned_head_count,
+                    tokenizer=summarize_tokenizer,
+                    iteration_limit=args.iteration_limit,
+                    trace_callback=trace_callback,
+                    print_log=print_log,
+                )
+            else:
+                langgraph_agent_executor = create_react_agent_toolcall(
+                    model, tools=tools, print_log=print_log
+                )
         else:
             from src.agents.ReAct.prompt.hotpotqa import get_system_prompt
             if args.fewshot > 5:
@@ -127,8 +161,20 @@ def main(args):
             sample_pass = False
             start_time = time.time()
             try:
-                with trace("ReAct_trace", tags=[args.workload, args.model, "Iteration_limit:"+str(args.iteration_limit)]):
-                    output_dict = run_agent(args=args, agent=langgraph_agent_executor, messages=messages, label=dataset[i]['answer'], evaluator=evaluator, query=query) # query is just for tracing.
+                hotpotqa_tags = [args.workload, args.model, "Iteration_limit:"+str(args.iteration_limit)]
+                if summarize_token_threshold > 0:
+                    hotpotqa_tags.append(f"summarize_T:{summarize_token_threshold}")
+                with trace("ReAct_trace", tags=hotpotqa_tags):
+                    output_dict = run_agent(
+                        args=args,
+                        agent=langgraph_agent_executor,
+                        messages=messages,
+                        label=dataset[i]['answer'],
+                        evaluator=evaluator,
+                        query=query,
+                        extra_state={"actor_steps": 0} if summarize_token_threshold > 0 else None,
+                        recursion_limit=args.iteration_limit * 3 if summarize_token_threshold > 0 else None,
+                    )
                 sample_pass = bool(output_dict["ispass"])
                 if sample_pass:
                     pass_count += 1
@@ -149,25 +195,55 @@ def main(args):
 
     elif args.workload == "webshop":
         from src.tools.webshop_tools.webshop_tools import SearchTool, ClickTool, ResetTool, set_webshop_url
-        from src.agents.ReAct.prompt.webshop import get_system_prompt
         set_webshop_url(args.webshop_url)
         reset = ResetTool()
         search = SearchTool()
         click = ClickTool()
         tools = [search, click]
-        if args.fewshot > 5:
-            print(f"Max fewshot examples for {args.workload} is 5. Running with 5 fewshot examples.")
-        system_prompt = get_system_prompt(fewshots=min(args.fewshot, 5))
-        langgraph_agent_executor = create_react_agent(
-            model, tools=tools, print_log=print_log
-        )
-        
+        fewshot_messages = []
+        if use_tool_calling:
+            from src.agents.ReAct.prompt.webshop_toolcall import (
+                get_fewshot_messages_toolcall,
+                get_system_prompt_toolcall,
+            )
+            system_prompt = get_system_prompt_toolcall()
+            fewshot_messages = get_fewshot_messages_toolcall()
+            if summarize_token_threshold > 0:
+                pinned_head_count = (
+                    (1 if system_prompt else 0) + len(fewshot_messages) + 1
+                )
+                langgraph_agent_executor = create_react_agent_toolcall_summarize(
+                    model,
+                    tools=tools,
+                    summarize_token_threshold=summarize_token_threshold,
+                    pinned_head_count=pinned_head_count,
+                    tokenizer=summarize_tokenizer,
+                    iteration_limit=args.iteration_limit,
+                    trace_callback=trace_callback,
+                    print_log=print_log,
+                )
+            else:
+                langgraph_agent_executor = create_react_agent_toolcall(
+                    model, tools=tools, print_log=print_log
+                )
+        else:
+            from src.agents.ReAct.prompt.webshop import get_system_prompt
+            if args.fewshot > 5:
+                print(f"Max fewshot examples for {args.workload} is 5. Running with 5 fewshot examples.")
+            system_prompt = get_system_prompt(fewshots=min(args.fewshot, 5))
+            langgraph_agent_executor = create_react_agent(
+                model, tools=tools, print_log=print_log
+            )
+
         for i in range(samples):
             session_id = dataset[i]
             query = reset._run(session_id=session_id)
             print(Fore.CYAN+Style.BRIGHT+f"[Sample {i+1}/{samples}] {query}"+Style.RESET_ALL)
             if system_prompt:
-                messages = [("system", system_prompt), ("human", query)]
+                messages = [("system", system_prompt)]
+                if use_tool_calling:
+                    messages += fewshot_messages
+                messages += [("human", query)]
             else:
                 messages = [("human", query)]
 
@@ -177,8 +253,20 @@ def main(args):
             sample_pass = False
             start_time = time.time()
             try:
-                with trace("ReAct_trace", tags=[args.workload, args.model, "Iteration_limit:"+str(args.iteration_limit), "Index:"+str(i)]):
-                    output_dict = run_agent(args=args, agent=langgraph_agent_executor, messages=messages, label=None, evaluator=evaluator, query=query)
+                webshop_tags = [args.workload, args.model, "Iteration_limit:"+str(args.iteration_limit), "Index:"+str(i)]
+                if summarize_token_threshold > 0:
+                    webshop_tags.append(f"summarize_T:{summarize_token_threshold}")
+                with trace("ReAct_trace", tags=webshop_tags):
+                    output_dict = run_agent(
+                        args=args,
+                        agent=langgraph_agent_executor,
+                        messages=messages,
+                        label=None,
+                        evaluator=evaluator,
+                        query=query,
+                        extra_state={"actor_steps": 0} if summarize_token_threshold > 0 else None,
+                        recursion_limit=args.iteration_limit * 3 if summarize_token_threshold > 0 else None,
+                    )
                 sample_pass = bool(output_dict["ispass"])
                 if sample_pass:
                     pass_count += 1
@@ -282,22 +370,35 @@ def main(args):
         if use_tool_calling:
             from langchain_core.utils.function_calling import convert_to_openai_tool
             tools_schema = [convert_to_openai_tool(t) for t in tools]
+        envelope_metadata = None
+        if summarize_token_threshold > 0:
+            envelope_metadata = {
+                "summarize_token_threshold": summarize_token_threshold,
+            }
         write_agentsim_trace(
             path=args.trace_path,
             model=args.model,
             agents=trace_agents,
             tools=tools_schema,
+            metadata=envelope_metadata,
         )
         print(f"Saved AgentSim trace to {args.trace_path} ({len(trace_agents)} agents)")
 
 @traceable()
-def run_agent(args, agent, messages, label=None, evaluator=None, query=None):
+def run_agent(args, agent, messages, label=None, evaluator=None, query=None,
+              extra_state=None, recursion_limit=None):
     score_output = ""
+    initial_input = {"messages": messages}
+    if extra_state:
+        initial_input.update(extra_state)
+    effective_recursion_limit = (
+        recursion_limit if recursion_limit is not None else args.iteration_limit
+    )
     for num, chunk in enumerate(
         agent.stream(
-            {"messages": messages},
+            initial_input,
             stream_mode="values",
-            config={"recursion_limit": args.iteration_limit}
+            config={"recursion_limit": effective_recursion_limit}
         )
     ):
         final_output = chunk
