@@ -1,3 +1,5 @@
+import json
+import os
 import time
 import numpy as np
 from langchain_openai import ChatOpenAI
@@ -19,6 +21,18 @@ from dotenv import load_dotenv
 from langsmith import traceable, trace
 
 load_dotenv()
+
+
+def _flush_trace(args, trace_agents, tools_schema, envelope_metadata):
+    """Write the current agent list to disk after each completed sample."""
+    write_agentsim_trace(
+        path=args.trace_path,
+        model=args.model,
+        agents=trace_agents,
+        tools=tools_schema,
+        metadata=envelope_metadata,
+    )
+
 
 def main(args):
     print_log = bool(getattr(args, "print_log", False))
@@ -100,9 +114,37 @@ def main(args):
         from transformers import AutoTokenizer
         summarize_tokenizer = AutoTokenizer.from_pretrained(args.model)
 
+    envelope_metadata = (
+        {"summarize_token_threshold": summarize_token_threshold}
+        if summarize_token_threshold > 0 else None
+    )
+
     system_prompt = None
+    tools_schema = None
     count = 0
     pass_count = 0
+
+    # Resume: if a partial trace file already exists, reload completed agents
+    # and skip those samples so the run picks up where it left off.
+    resume_from = 0
+    if save_trace and os.path.exists(args.trace_path):
+        try:
+            with open(args.trace_path) as f:
+                existing = json.load(f)
+            trace_agents = existing.get("agents", [])
+            resume_from = len(trace_agents)
+            pass_count = sum(1 for a in trace_agents if a.get("success"))
+            count = resume_from
+            if resume_from > 0:
+                print(
+                    f"[resume] Loaded {resume_from} completed agents from "
+                    f"{args.trace_path}; resuming from sample "
+                    f"{getattr(args, 'sample_start', 0) + resume_from}."
+                )
+        except Exception as exc:
+            print(f"[resume] Failed to load existing trace ({exc}); starting fresh.")
+            trace_agents = []
+            resume_from = 0
     if args.workload == "hotpotqa":
         from src.tools.hotpotqa_tools.wikipedia import WikipediaTool, LookupTool, FinishTool
         search = WikipediaTool(name="search")
@@ -142,8 +184,14 @@ def main(args):
             langgraph_agent_executor = create_react_agent(
                 model, tools=tools, print_log=print_log
             )
-        
-        for i in range(samples):
+
+        if use_tool_calling:
+            from langchain_core.utils.function_calling import convert_to_openai_tool
+            tools_schema = [convert_to_openai_tool(t) for t in tools]
+        else:
+            tools_schema = None
+
+        for i in range(resume_from, samples):
             query = dataset[i]["question"]
             print(Fore.CYAN+Style.BRIGHT+f"[Sample {i+1}/{samples}] {query}"+Style.RESET_ALL)
 
@@ -192,6 +240,7 @@ def main(args):
                 trace_agents.append(
                     {"success": sample_pass, "turns": trace_callback.snapshot_turns()}
                 )
+                _flush_trace(args, trace_agents, tools_schema, envelope_metadata)
 
     elif args.workload == "webshop":
         from src.tools.webshop_tools.webshop_tools import SearchTool, ClickTool, ResetTool, set_webshop_url
@@ -235,7 +284,13 @@ def main(args):
                 model, tools=tools, print_log=print_log
             )
 
-        for i in range(samples):
+        if use_tool_calling:
+            from langchain_core.utils.function_calling import convert_to_openai_tool
+            tools_schema = [convert_to_openai_tool(t) for t in tools]
+        else:
+            tools_schema = None
+
+        for i in range(resume_from, samples):
             session_id = dataset[i]
             query = reset._run(session_id=session_id)
             print(Fore.CYAN+Style.BRIGHT+f"[Sample {i+1}/{samples}] {query}"+Style.RESET_ALL)
@@ -286,7 +341,8 @@ def main(args):
                 trace_agents.append(
                     {"success": sample_pass, "turns": trace_callback.snapshot_turns()}
                 )
-        
+                _flush_trace(args, trace_agents, tools_schema, envelope_metadata)
+
     elif args.workload == "math":
         from src.tools.math_tools.math_tools import WolframAlphaTool, CalculatorTool, FinishTool
         from src.tools.math_tools.math_equivalence import extract_boxed_value
@@ -366,22 +422,7 @@ def main(args):
             pretty_output(i)
 
     if save_trace and trace_agents:
-        tools_schema = None
-        if use_tool_calling:
-            from langchain_core.utils.function_calling import convert_to_openai_tool
-            tools_schema = [convert_to_openai_tool(t) for t in tools]
-        envelope_metadata = None
-        if summarize_token_threshold > 0:
-            envelope_metadata = {
-                "summarize_token_threshold": summarize_token_threshold,
-            }
-        write_agentsim_trace(
-            path=args.trace_path,
-            model=args.model,
-            agents=trace_agents,
-            tools=tools_schema,
-            metadata=envelope_metadata,
-        )
+        _flush_trace(args, trace_agents, tools_schema, envelope_metadata)
         print(f"Saved AgentSim trace to {args.trace_path} ({len(trace_agents)} agents)")
 
 @traceable()
