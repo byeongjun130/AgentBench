@@ -174,7 +174,9 @@ def main(args):
                 )
             else:
                 langgraph_agent_executor = create_react_agent_toolcall(
-                    model, tools=tools, print_log=print_log
+                    model, tools=tools,
+                    iteration_limit=args.iteration_limit,
+                    print_log=print_log,
                 )
         else:
             from src.agents.ReAct.prompt.hotpotqa import get_system_prompt
@@ -220,8 +222,8 @@ def main(args):
                         label=dataset[i]['answer'],
                         evaluator=evaluator,
                         query=query,
-                        extra_state={"actor_steps": 0} if summarize_token_threshold > 0 else None,
-                        recursion_limit=args.iteration_limit * 3 if summarize_token_threshold > 0 else None,
+                        extra_state={"actor_steps": 0} if use_tool_calling else None,
+                        recursion_limit=args.iteration_limit * 3 if use_tool_calling else None,
                     )
                 sample_pass = bool(output_dict["ispass"])
                 if sample_pass:
@@ -273,7 +275,9 @@ def main(args):
                 )
             else:
                 langgraph_agent_executor = create_react_agent_toolcall(
-                    model, tools=tools, print_log=print_log
+                    model, tools=tools,
+                    iteration_limit=args.iteration_limit,
+                    print_log=print_log,
                 )
         else:
             from src.agents.ReAct.prompt.webshop import get_system_prompt
@@ -319,8 +323,8 @@ def main(args):
                         label=None,
                         evaluator=evaluator,
                         query=query,
-                        extra_state={"actor_steps": 0} if summarize_token_threshold > 0 else None,
-                        recursion_limit=args.iteration_limit * 3 if summarize_token_threshold > 0 else None,
+                        extra_state={"actor_steps": 0} if use_tool_calling else None,
+                        recursion_limit=args.iteration_limit * 3 if use_tool_calling else None,
                     )
                 sample_pass = bool(output_dict["ispass"])
                 if sample_pass:

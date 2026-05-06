@@ -29,13 +29,22 @@ from typing_extensions import Annotated, TypedDict
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    actor_steps: int
 
 
 def create_react_agent_toolcall(
     model: LanguageModelLike,
     tools: Sequence[BaseTool],
+    iteration_limit: int,
     print_log: bool = False,
 ) -> CompiledStateGraph:
+    """Build a tool-calling ReAct graph with an actor-step iteration cap.
+
+    Only `agent` (call_model) visits count toward `iteration_limit`; tool
+    visits do not. LangGraph's recursion_limit must be set higher than
+    iteration_limit on the caller side (≥ 2 × iteration_limit + headroom)
+    to leave room for tool node visits.
+    """
     tool_dict = {t.name: t for t in tools}
     # tool_choice="any" forces the model to always emit a structured
     # tool_call; otherwise gpt-oss sometimes drops the finish call into
@@ -52,7 +61,10 @@ def create_react_agent_toolcall(
                 print(Fore.CYAN + str(response.content) + Style.RESET_ALL)
             for tc in getattr(response, "tool_calls", None) or []:
                 print(Fore.MAGENTA + f"{tc['name']}({tc.get('args', {})})" + Style.RESET_ALL)
-        return {"messages": [response]}
+        return {
+            "messages": [response],
+            "actor_steps": state.get("actor_steps", 0) + 1,
+        }
 
     def execute_tool(state: AgentState) -> AgentState:
         last: AIMessage = state["messages"][-1]
@@ -113,11 +125,16 @@ def create_react_agent_toolcall(
                 return {"messages": out}
             # webshop's SearchTool/ClickTool return (observation, info); info carries
             # `done: True` once the user clicks Buy Now. Pass it through so
-            # `should_continue` can exit without a dedicated finish tool.
+            # `route_after_tool` can exit without a dedicated finish tool.
             out.append(ToolMessage(content=result, tool_call_id=tc_id, artifact=tool_artifact))
         return {"messages": out}
 
-    def should_continue(state: AgentState) -> Literal["agent", "__end__"]:
+    def route_after_agent(state: AgentState) -> Literal["tool", "__end__"]:
+        if state.get("actor_steps", 0) >= iteration_limit:
+            return "__end__"
+        return "tool"
+
+    def route_after_tool(state: AgentState) -> Literal["agent", "__end__"]:
         last = state["messages"][-1]
         artifact = getattr(last, "artifact", None)
         if artifact and artifact.get("done"):
@@ -128,6 +145,6 @@ def create_react_agent_toolcall(
     workflow.add_node("agent", call_model)
     workflow.add_node("tool", execute_tool)
     workflow.set_entry_point("agent")
-    workflow.add_edge("agent", "tool")
-    workflow.add_conditional_edges("tool", should_continue)
+    workflow.add_conditional_edges("agent", route_after_agent)
+    workflow.add_conditional_edges("tool", route_after_tool)
     return workflow.compile()

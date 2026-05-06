@@ -29,7 +29,7 @@ agents:
     use_tool_calling: true
     samples: 500
     sample_start: 0
-    trace_path: "./traces/react_hotpotqa_500_toolcall.json"
+    trace_path: "./traces/react_hotpotqa_500_toolcall_iter60.json"
 
   my_react_webshop_agent:
     type: "react"
@@ -44,9 +44,9 @@ agents:
     iteration_limit: 60
     fewshot: 0                              # fewshot handled inside webshop_toolcall.py
     use_tool_calling: true
-    samples: 500
+    samples: 400
     sample_start: 0
-    trace_path: "./traces/react_webshop_500_toolcall.json"
+    trace_path: "./traces/react_webshop_400_toolcall_iter60.json"
 
   my_react_hotpotqa_toolcall_summarize_agent:    # ReAct + auto-compact summarization (hotpotqa)
     type: "react"
@@ -59,16 +59,93 @@ agents:
     summarize_token_threshold: 4000             # 0 / null disables. Sweep: {2000,4000,6000,8000,12000,0}
     trace_path: "./traces/react_hotpotqa_500_toolcall_summ_T4000.json"
 
-  my_react_webshop_toolcall_summarize_agent:     # ReAct + auto-compact summarization (webshop)
+  my_react_hotpotqa_toolcall_summ_T2000:
+    type: "react"
+    workload: "hotpotqa"
+    iteration_limit: 60
+    fewshot: 0
+    use_tool_calling: true
+    samples: 500
+    sample_start: 0
+    summarize_token_threshold: 2000
+    trace_path: "./traces/react_hotpotqa_500_toolcall_summ_T2000.json"
+
+  my_react_hotpotqa_toolcall_summ_T6000:
+    type: "react"
+    workload: "hotpotqa"
+    iteration_limit: 60
+    fewshot: 0
+    use_tool_calling: true
+    samples: 500
+    sample_start: 0
+    summarize_token_threshold: 6000
+    trace_path: "./traces/react_hotpotqa_500_toolcall_summ_T6000.json"
+
+  my_react_hotpotqa_toolcall_summ_T8000:
+    type: "react"
+    workload: "hotpotqa"
+    iteration_limit: 60
+    fewshot: 0
+    use_tool_calling: true
+    samples: 500
+    sample_start: 0
+    summarize_token_threshold: 8000
+    trace_path: "./traces/react_hotpotqa_500_toolcall_summ_T8000.json"
+
+  my_react_hotpotqa_toolcall_summ_T12000:
+    type: "react"
+    workload: "hotpotqa"
+    iteration_limit: 60
+    fewshot: 0
+    use_tool_calling: true
+    samples: 500
+    sample_start: 0
+    summarize_token_threshold: 12000
+    trace_path: "./traces/react_hotpotqa_500_toolcall_summ_T12000.json"
+
+  my_react_webshop_toolcall_summ_T2000:
     type: "react"
     workload: "webshop"
     iteration_limit: 60
     fewshot: 0
     use_tool_calling: true
-    samples: 30
+    samples: 500
     sample_start: 0
-    summarize_token_threshold: 4000             # 0 / null disables. Sweep: {2000,4000,6000,8000,12000,0}
+    summarize_token_threshold: 2000
+    trace_path: "./traces/react_webshop_500_toolcall_summ_T2000.json"
+
+  my_react_webshop_toolcall_summ_T4000:
+    type: "react"
+    workload: "webshop"
+    iteration_limit: 60
+    fewshot: 0
+    use_tool_calling: true
+    samples: 500
+    sample_start: 0
+    summarize_token_threshold: 4000
+    trace_path: "./traces/react_webshop_500_toolcall_summ_T4000.json"
+
+  my_react_webshop_toolcall_summ_T8000:
+    type: "react"
+    workload: "webshop"
+    iteration_limit: 60
+    fewshot: 0
+    use_tool_calling: true
+    samples: 500
+    sample_start: 0
+    summarize_token_threshold: 8000
     trace_path: "./traces/react_webshop_500_toolcall_summ_T8000.json"
+
+  my_react_webshop_toolcall_summ_test:          # Quick smoke test: 1 sample, low threshold
+    type: "react"
+    workload: "webshop"
+    iteration_limit: 4
+    fewshot: 0
+    use_tool_calling: true
+    samples: 1
+    sample_start: 0
+    summarize_token_threshold: 1000
+    trace_path: "./traces/react_webshop_summ_test.json"
 
   my_reflexion_hotpotqa_agent:
     type: "reflexion"
